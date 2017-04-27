@@ -12,21 +12,54 @@ namespace BRI_button_test
 {
     public partial class Form1 : Form, IDisposable
     {
+        static bool doNotUpdate = true;
+
         BRIReader _BRIReader;
         SSAPI _SSAPI;
+        
+        BRIReader.RFIDButtonIDs[] bIDs = new BRIReader.RFIDButtonIDs[]{
+                BRIReader.RFIDButtonIDs.CENTER,
+                BRIReader.RFIDButtonIDs.LEFT,
+                BRIReader.RFIDButtonIDs.MIDDLE,
+                BRIReader.RFIDButtonIDs.RIGHT};
+        Dictionary<BRIReader.RFIDButtonIDs, CheckBox> chkBoxes = new Dictionary<BRIReader.RFIDButtonIDs, CheckBox>();
         /*
         CENTER  The center trigger button on a portable reader.
         LEFT    The left scan button on a mobile computer.
         MIDDLE  The center scan button on a mobile computer.
         RIGHT   The right scan button on a mobile computer.
         UNKNOWN Unknown button ID.
+         * 
+        The registry changes
+         * ie BriReaderButonEnable( RFIDButtonID.Left ) changes event2 from "ITC_RFID_TRIGGER_EVENT" to "RFIDDCE_LEFT_DELTA" (HKEY_LOCAL_MACHINE\Drivers\HID\ClientDrivers\ITCKeyboard\Layout\A-Numeric\0001\Events\Delta)
+         * MIDDLE changes event1 between "RFIDDCE_MIDDLE_DELTA" and "DeltaLeftScan"
+         * 
+         * ITC_RFID_TRIGGER_EVENT is for general RFID and used by IntermecSettings for RFID, that does not include Button Event Firing, which is only done for "Button Remapping" settings to "BRI" (which is RFIDDCE_ in registry).
+         * RFIDDCE_... is for BRI
+         * so, the ITC_RFID_TRIGGER_EVENT will trigger a RFID TAG read but this button press will not be reported to BRIReader
         */
         public Form1()
         {
             InitializeComponent();
             _SSAPI = new SSAPI();
-            _BRIReader = new BRIReader(this);
+            BRIReader.LoggerOptionsAdv logOpts=new BRIReader.LoggerOptionsAdv();
+            logOpts.LogEnable=true;
+            logOpts.LogFilePath=@"\RFIDLog1.txt";
+            logOpts.IDEConsoleEnable = false; //send to debugOut?
+            logOpts.TimeStampEnable=true;
+            logOpts.TraceSeverity=BasicBRIReader.LoggerOptions.TraceSeverityLevels.DEBUG;
+            logOpts.ShowNonPrintableChars = true;
+
+            _BRIReader = new BRIReader(this, "tcp://127.0.0.1:2189", logOpts);
+            
             _BRIReader.EventHandlerRFIDButton += new DCE_BUTTON_EventHandlerAdv(_BRIReader_EventHandlerRFIDButton);
+
+            //for reading TAGs
+            _BRIReader.EventHandlerTag += new Tag_EventHandlerAdv(_BRIReader_EventHandlerTag);
+
+            //will only be called for Trigger presses on RFID Handle (if any)
+            _BRIReader.EventHandlerTriggerAction += new TriggerAction_EventHandler(_BRIReader_EventHandlerTriggerAction);
+
             textBox1.Text = getButtonSetting().ToString();
 
             //if (!this._BRIReader.IsRFIDButtonEnabled(BRIReader.RFIDButtonIDs.MIDDLE))
@@ -34,9 +67,58 @@ namespace BRI_button_test
 
             chkLeftLower.CheckStateChanged += new EventHandler(CheckStateChanged);
             chkLeftUpper.CheckStateChanged += new EventHandler(CheckStateChanged);
+            chkLeftLower.CheckStateChanged += new EventHandler(CheckStateChanged);
             chkRightLower.CheckStateChanged += new EventHandler(CheckStateChanged);
-            chkRightLower.CheckStateChanged += new EventHandler(CheckStateChanged);
+
+            chkBoxes.Add(BRIReader.RFIDButtonIDs.CENTER, chkCenterScan);
+            chkBoxes.Add(BRIReader.RFIDButtonIDs.LEFT,chkLeftLower);
+            chkBoxes.Add(BRIReader.RFIDButtonIDs.MIDDLE, chkButtonMiddle);
+            chkBoxes.Add(BRIReader.RFIDButtonIDs.RIGHT, chkRightLower);
+            
+            chkRightUpper.Enabled=false;
+            chkLeftUpper.Enabled=false;
+
+            CheckBox ChkBox=null;
+            foreach(BRIReader.RFIDButtonIDs id in bIDs){
+                if(_BRIReader.IsRFIDButtonEnabled(id)){
+                    if (chkBoxes.TryGetValue(id, out ChkBox))
+                        ChkBox.Checked = true;
+                }
+                else{
+                    if (chkBoxes.TryGetValue(id, out ChkBox))
+                        ChkBox.Checked = false;
+                }
+            }
+            updateCheckBoxes();
+            doNotUpdate = false;
         }
+
+        void _BRIReader_EventHandlerTriggerAction(object sender, TriggerAction_EventArgs EvtArgs)
+        {
+            addLog("EventHandlerTriggerAction: " + EvtArgs.TriggerName);
+        }
+
+        void _BRIReader_EventHandlerTag(object sender, EVTADV_Tag_EventArgs EvtArgs)
+        {
+            addLog("EventHandlerTag: "+ Encoding.ASCII.GetString(EvtArgs.Data, 0, EvtArgs.Data.Length));
+        }
+
+        void updateCheckBoxes()
+        {
+            doNotUpdate = true;
+            CheckBox ChkBox=null;
+            foreach(BRIReader.RFIDButtonIDs id in bIDs){
+                if(_BRIReader.IsRFIDButtonEnabled(id)){
+                    if (chkBoxes.TryGetValue(id, out ChkBox))
+                        ChkBox.Checked = true;
+                }
+                else{
+                    if (chkBoxes.TryGetValue(id, out ChkBox))
+                        ChkBox.Checked = false;
+                }
+            }
+        }
+
         void _BRIReader_EventHandlerRFIDButton(object sender, EVTADV_RFIDButton_EventArgs EvtArgs)
         {
             try
@@ -71,11 +153,13 @@ namespace BRI_button_test
                         //
                         // The button or trigger has been pressed by the operator...
                         addLog("EvtArgs.ButtonState: " + "PRESSED");
+                        _BRIReader.StartReadingTags(BRIReader.TagReportOptions.EVENT);
                         break;
                     case EVTADV_RFIDButton_EventArgs.RFIDButtonStates.RELEASED:
                         //
                         // The button or trigger has been released by the operator...
                         addLog("EvtArgs.ButtonState: " + "RELEASED");
+                        _BRIReader.StopReadingTags();
                         break;
                 }
                 // Perform any action you intend to associate with the particular 
@@ -99,19 +183,19 @@ namespace BRI_button_test
                 _SSAPI.Dispose();
                 _SSAPI = null;
             }
+            base.Dispose();
         }
         private void btnEnableBRI_Click(object sender, EventArgs e)
         {
-            BRIReader.RFIDButtonIDs[] bIDs = new BRIReader.RFIDButtonIDs[]{
-                BRIReader.RFIDButtonIDs.CENTER,
-                BRIReader.RFIDButtonIDs.LEFT,
-                BRIReader.RFIDButtonIDs.MIDDLE,
-                BRIReader.RFIDButtonIDs.RIGHT};
-            foreach (BRIReader.RFIDButtonIDs id in bIDs)
-            {
-                //enableButtonX(id);
-                this._BRIReader.RFIDButtonEnable(id);
-            }
+            if (_BRIReader.RFIDButtonEnable(BRIReader.RFIDButtonIDs.MIDDLE))
+                addLog("setting MIDDLE enable OK");
+            else
+                addLog("setting MIDDLE enable FAILED");
+            //foreach (BRIReader.RFIDButtonIDs id in bIDs)
+            //{
+            //    //enableButtonX(id);
+            //    this._BRIReader.RFIDButtonEnable(id);
+            //}
         }
 
         void enableButtonX(BRIReader.RFIDButtonIDs btnId)
@@ -130,17 +214,12 @@ namespace BRI_button_test
 
         private void btnDisableBRI_Click(object sender, EventArgs e)
         {
-            if (!_BRIReader.RFIDButtonDisable(BRIReader.RFIDButtonIDs.MIDDLE))
-            {
-                textBox1.Text = "disable FAILED";
-                addLog("disable FAILED");
-            }
+            if (_BRIReader.RFIDButtonEnable(BRIReader.RFIDButtonIDs.MIDDLE))
+                addLog("setting MIDDLE enable OK");
             else
-            {
-                addLog("disable OK");
-                textBox1.Text = getButtonSetting().ToString();
-            }
+                addLog("setting MIDDLE enable FAILED");
         }
+
         CenterMapped getButtonSetting()
         {
             String sResp = "";
@@ -224,6 +303,8 @@ namespace BRI_button_test
 
         private void CheckStateChanged(object sender, EventArgs e)
         {
+            if (doNotUpdate)
+                return;
             CheckBox cb = (CheckBox)sender;
             BRIReader.RFIDButtonIDs btn = BRIReader.RFIDButtonIDs.CENTER;
             if (cb.Name == "chkLeftUpper")
@@ -239,10 +320,30 @@ namespace BRI_button_test
             if (cb.Name == "chkCenterScan")
                 btn = BRIReader.RFIDButtonIDs.CENTER;
 
+            if (cb.Name == "chkButtonMiddle")
+                btn = BRIReader.RFIDButtonIDs.MIDDLE;
+
             if (cb.Checked)
-                _BRIReader.RFIDButtonEnable(btn);
+            {
+                if (!_BRIReader.RFIDButtonEnable(btn))
+                    addLog("Enable button " + btn.ToString() + " FAILED");
+                else
+                    addLog("Enable button " + btn.ToString() + " OK");
+            }
             else
-                _BRIReader.RFIDButtonDisable(btn);
+            {
+                if (!_BRIReader.RFIDButtonDisable(btn))
+                    addLog("Disable button " + btn.ToString() + " FAILED");
+                else
+                    addLog("Disable button " + btn.ToString() + " FAILED");
+            }
+        }
+
+        private void btnGetRFIDMapping_Click(object sender, EventArgs e)
+        {
+            doNotUpdate = true;
+            updateCheckBoxes();
+            doNotUpdate = false;
         }
     }
 }

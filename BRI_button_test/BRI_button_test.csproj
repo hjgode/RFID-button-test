@@ -46,6 +46,7 @@
   </PropertyGroup>
   <ItemGroup>
     <Reference Include="Intermec.DataCollection.RFID.AdvancedBRI.CF3.5, Version=4.2.0.2226, Culture=neutral, PublicKeyToken=acd169b56b6148ba, processorArchitecture=MSIL" />
+    <Reference Include="Intermec.DataCollection.RFID.BasicBRI.CF3.5, Version=4.2.0.2226, Culture=neutral, PublicKeyToken=acd169b56b6148ba, processorArchitecture=MSIL" />
     <Reference Include="Intermec.DeviceManagement.SmartSystem.ITCSSApi, Version=8.90.0.384, Culture=neutral, PublicKeyToken=acd169b56b6148ba, processorArchitecture=MSIL" />
     <Reference Include="mscorlib" />
     <Reference Include="System" />
