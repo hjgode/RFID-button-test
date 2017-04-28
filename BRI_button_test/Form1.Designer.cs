@@ -191,7 +191,7 @@
             this.Menu = this.mainMenu1;
             this.MinimizeBox = false;
             this.Name = "Form1";
-            this.Text = "Form1";
+            this.Text = "RFID Buton Test v2";
             this.Closing += new System.ComponentModel.CancelEventHandler(this.Form1_Closing);
             this.ResumeLayout(false);
 
